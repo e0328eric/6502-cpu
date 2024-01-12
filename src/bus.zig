@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 
 const CPU_RAM_CAPACITY: usize = 0x800;
 const CARTRIDGE_CAPACITY: usize = 0xBFE0;
@@ -7,7 +8,9 @@ pub fn isMemory(comptime T: type) bool {
     return @hasDecl(T, "readByte") and @hasDecl(T, "writeByte");
 }
 
-// Assertion that CpuBus should be `Memory`.
+comptime {
+    assert(isMemory(CpuBus)); // CpuBus should be a `memory`
+}
 pub const CpuBus = struct {
     ram: [CPU_RAM_CAPACITY]u8,
     cartridge_space: [CARTRIDGE_CAPACITY]u8,

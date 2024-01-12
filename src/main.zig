@@ -1,10 +1,13 @@
 const std = @import("std");
 const rl = @import("raylib.zig");
 
+const Cpu = @import("./Cpu.zig");
+const CpuBus = @import("./bus.zig").CpuBus;
+
 const SCREEN_WIDTH = 800;
 const SCREEN_HEIGHT = 600;
 
-pub fn main() void {
+pub fn main() !void {
     if (false) {
         rl.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "foo");
         defer rl.CloseWindow();
@@ -22,8 +25,8 @@ pub fn main() void {
         }
     }
 
-    const CpuBus = @import("./bus.zig").CpuBus;
+    const allocator = std.heap.c_allocator;
 
-    const bus = CpuBus.init();
-    _ = bus.readByte(0x0888);
+    const cpu = try Cpu.init(allocator);
+    defer cpu.deinit();
 }
