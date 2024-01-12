@@ -1,6 +1,24 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
-pub fn build(b: *std.Build) !void {
+const min_zig_version_str = "0.12.0-dev.2150+63de8a598";
+
+const Build = blk: {
+    const current_zig_version_str = builtin.zig_version_string;
+
+    const current_zig_version = builtin.zig_version;
+    const min_zig_version = std.SemanticVersion.parse(min_zig_version_str) catch unreachable;
+
+    if (current_zig_version.order(min_zig_version) == .lt) {
+        @compileError(std.fmt.comptimePrint(
+            "Required at least v{s}, but current zig version is v{s}.\n",
+            .{ min_zig_version_str, current_zig_version_str },
+        ));
+    }
+    break :blk std.Build;
+};
+
+pub fn build(b: *Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const version = try std.SemanticVersion.parse("0.1.0");
@@ -50,9 +68,9 @@ pub fn build(b: *std.Build) !void {
 
 // NOTE: Stolen from https://github.com/Not-Nik/raylib-zig/blob/devel/build.zig
 fn linkRaylib(
-    b: *std.Build,
-    exe: *std.Build.Step.Compile,
-    target: std.zig.CrossTarget,
+    b: *Build,
+    exe: *Build.Step.Compile,
+    target: Build.ResolvedTarget,
     optimize: std.builtin.Mode,
 ) void {
     const raylib = b.dependency("raylib", .{
@@ -61,8 +79,8 @@ fn linkRaylib(
     });
     const art = raylib.artifact("raylib");
 
-    const target_os = exe.target.toTarget().os.tag;
-    switch (target_os) {
+    const target_os = exe.rootModuleTarget();
+    switch (target_os.os.tag) {
         .windows => {
             exe.linkSystemLibrary("winmm");
             exe.linkSystemLibrary("gdi32");

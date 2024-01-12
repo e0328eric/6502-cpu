@@ -9,8 +9,8 @@
 
     .dependencies = .{
         .raylib = .{
-            .url = "https://github.com/raysan5/raylib/archive/refs/tags/5.0.tar.gz",
-            .hash = "1220c28847ca8e8756734ae84355802b764c9d9cf4de057dbc6fc2b15c56e726f27b",
+            .url = "https://github.com/raysan5/raylib/archive/9d628d1d499f8ad9c0e6fbed69914cecb611d6cd.tar.gz",
+            .hash = "12205d16f4498cc73ff65fe195480f5303435aa5f1ccbb0b52674e9b090f9e68fcd2",
         },
     },
 
