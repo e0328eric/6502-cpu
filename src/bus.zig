@@ -1,11 +1,15 @@
 const std = @import("std");
+
 const assert = std.debug.assert;
 
 const CPU_RAM_CAPACITY: usize = 0x800;
 const CARTRIDGE_CAPACITY: usize = 0xBFE0;
 
 pub fn isMemory(comptime T: type) bool {
-    return @hasDecl(T, "readByte") and @hasDecl(T, "writeByte");
+    // zig fmt: off
+    return @hasDecl(T, "readByte") and @hasDecl(T, "writeByte")
+       and @hasDecl(T, "read16Bit") and @hasDecl(T, "write16Bit");
+    // zig fmt: on
 }
 
 comptime {
@@ -22,7 +26,7 @@ pub const CpuBus = struct {
         self.cartridge_space = [_]u8{0} ** CARTRIDGE_CAPACITY;
     }
 
-    pub fn readByte(self: Self, addr: u16) ?u8 {
+    pub fn readByte(self: Self, addr: u16) u8 {
         return switch (addr) {
             // actural ram location
             0x0000...0x07FF => self.ram[addr],
@@ -34,7 +38,7 @@ pub const CpuBus = struct {
 
             // cartridge space
             0x4020...0xFFFF => self.cartridge_space[addr - 0x4020],
-            else => null,
+            else => 0, // ignore byte for other region
         };
     }
 
@@ -52,5 +56,38 @@ pub const CpuBus = struct {
             0x4020...0xFFFF => self.cartridge_space[addr - 0x4020] = val,
             else => {},
         };
+    }
+
+    pub fn read16Bit(self: Self, addr: u16) u16 {
+        if (addr == 0xFFFF) {
+            return 0;
+        }
+
+        const lo = self.readByte(addr);
+        const hi = self.readByte(addr + 1);
+
+        return @as(u16, hi) << 8 | @as(u16, lo);
+    }
+
+    pub fn write16Bit(self: *Self, addr: u16, val: u16) void {
+        if (addr == 0xFFFF) {
+            return;
+        }
+
+        const lo = val & 0x00FF;
+        const hi = val & 0xFF00;
+
+        self.writeByte(addr, lo);
+        self.writeByte(addr + 1, hi);
+    }
+
+    pub fn loadProgram(self: *Self, program: []const u8) !void {
+        const program_size = 0xFFFF - 0x8000 + 1;
+
+        if (program.len > program_size) {
+            return error.CannotLoadProgram;
+        }
+
+        @memcpy(self.cartridge_space[(0x8000 - 0x4020)..], program);
     }
 };
