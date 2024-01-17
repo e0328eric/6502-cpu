@@ -372,8 +372,7 @@ fn sbc(self: *Self, comptime addr_mode: AddressingMode) void {
     const memory_data = self.bus.readByte(addr);
 
     const sub_with_overflow = blk: {
-        const tmp_mem_data = ~memory_data;
-        const tmp1 = @addWithOverflow(old_reg_a, tmp_mem_data);
+        const tmp1 = @addWithOverflow(old_reg_a, ~memory_data);
         const tmp2 = @addWithOverflow(tmp1[0], @as(u8, @intFromBool(self.flags.C)));
         break :blk .{ tmp2[0], @as(bool, @bitCast(tmp1[1] | tmp2[1])) };
     };
@@ -385,7 +384,7 @@ fn sbc(self: *Self, comptime addr_mode: AddressingMode) void {
     self.setFlag('C', .{ .is_carried = sub_with_overflow[1] });
     self.setFlag('V', .{ .overflowed_data = .{
         .a = old_reg_a,
-        .b = memory_data,
+        .b = ~memory_data,
         .result = sub_with_overflow[0],
     } });
 
