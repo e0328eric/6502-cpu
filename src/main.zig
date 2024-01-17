@@ -30,3 +30,8 @@ pub fn main() !void {
     const cpu = try Cpu.init(allocator);
     defer cpu.deinit();
 }
+
+test "pixeka testing" {
+    _ = @import("./bus.zig");
+    _ = @import("./Cpu.zig");
+}
