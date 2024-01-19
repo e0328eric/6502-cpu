@@ -12,7 +12,7 @@ const Allocator = std.mem.Allocator;
 //  |||| |||+- Carry
 //  |||| ||+-- Zero
 //  |||| |+--- Interrupt Disable
-//  |||| +---- Decimal
+//  |||| +---- Decimal (NO Effect in NES)
 //  |||+------ (No CPU effect; see: the B flag)
 //  ||+------- (No CPU effect; always pushed as 1)
 //  |+-------- Overflow
@@ -74,13 +74,21 @@ pub fn reset(self: *Self) void {
     self.pc = self.bus.read16Bit(0xFFFC);
 }
 
-pub fn loadAndRun(self: *Self, program: []const u8) !void {
+pub fn loadAndRun(self: *Self, comptime dump_reg: bool, program: []const u8) !void {
     try self.loadProgram(program);
     self.reset();
 
     while (true) {
         const opcode = self.bus.readByte(self.pc);
         self.pc += 1;
+
+        if (dump_reg) {
+            std.debug.print("< a: ${x}, x: ${x}, y: ${x} >\n", .{
+                self.reg_a,
+                self.reg_x,
+                self.reg_y,
+            });
+        }
 
         // TODO: make an interrupt request and remove this line
         if (opcode == 0x00) break; // BRK instruction
@@ -170,20 +178,16 @@ fn getOperandAddress(self: Self, comptime mode: AddressingMode) u16 {
         .IndirectX => blk: {
             const pos = self.bus.readByte(self.pc);
 
-            const hi = hi: {
-                const hi_pos = @as(u16, pos +% self.reg_x +% 1);
-                break :hi self.bus.read16Bit(hi_pos);
-            };
-            const lo = lo: {
-                const lo_pos = @as(u16, pos +% self.reg_x);
-                break :lo self.bus.read16Bit(lo_pos);
-            };
+            const hi = self.bus.readByte(@as(u16, pos +% self.reg_x +% 1));
+            const lo = self.bus.readByte(@as(u16, pos +% self.reg_x));
 
-            break :blk hi << 8 | lo;
+            break :blk @as(u16, hi) << 8 | @as(u16, lo);
         },
         .IndirectY => blk: {
-            const hi = self.bus.readByte(self.pc +% 1);
-            const lo = self.bus.readByte(self.pc);
+            const pos = self.bus.readByte(self.pc);
+
+            const hi = self.bus.readByte(@as(u16, pos +% 1));
+            const lo = self.bus.readByte(@as(u16, pos));
 
             break :blk (@as(u16, hi) << 8 | @as(u16, lo)) +% @as(u16, self.reg_y);
         },

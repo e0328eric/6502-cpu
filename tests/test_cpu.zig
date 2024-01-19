@@ -1,130 +1,31 @@
 const std = @import("std");
+const fmt = std.fmt;
+const mem = std.mem;
 
-const Cpu = @import("pixeka").Cpu;
+pub inline fn parseHexDump(comptime hex_dump: []const u8) []const u8 {
+    comptime {
+        @setEvalBranchQuota(50000);
+        var output = [_]u8{0} ** hex_dump.len;
+        var idx = 0;
 
-const testing_allocator = std.testing.allocator;
-const expect = std.testing.expect;
+        var iter = mem.tokenizeAny(u8, hex_dump, " \n");
+        while (iter.next()) |num_lit| {
+            if (num_lit[num_lit.len -| 1] == ':') continue;
+            output[idx] = fmt.parseInt(u8, num_lit, 16) catch {
+                @compileError(fmt.comptimePrint(
+                    "cannot parse {s} into a hexdecimal integer",
+                    .{num_lit},
+                ));
+            };
+            idx += 1;
+        }
 
-// NOTE: programs are generated from https://skilldrick.github.io/easy6502
-test "load and store instructions" {
-    // Program Assembly
-    //
-    // LDA #$01
-    // STA $0200
-    // LDX #$05
-    // STX $0201
-    // LDY #$08
-    // STY $0202
-    //
-    // STA $0203
-    // LDA $0202
-    // STA $0200
-    // LDX $0203
-    // STX $0202
-    // LDY $0201
-    // STY $0203
-    //
-    // BRK
-    //
-    // zig fmt: off
-    const program = [_]u8{
-        0xA9, 0x01, 0x8D, 0x00, 0x02, 0xA2, 0x05, 0x8E, 0x01, 0x02, 0xA0, 0x08,
-        0x8C, 0x02, 0x02, 0x8D, 0x03, 0x02, 0xAD, 0x02, 0x02, 0x8D, 0x00, 0x02,
-        0xAE, 0x03, 0x02, 0x8E, 0x02, 0x02, 0xAC, 0x01, 0x02, 0x8C, 0x03, 0x02,
-        0x00,
-    };
-    // zig fmt: on
-
-    var cpu = try Cpu.init(testing_allocator);
-    defer cpu.deinit();
-
-    try cpu.loadAndRun(&program);
-
-    // expected registers
-    try expect(cpu.reg_a == 0x08);
-    try expect(cpu.reg_x == 0x01);
-    try expect(cpu.reg_y == 0x05);
-
-    // expected program counter
-    try expect(cpu.pc == 0x8025);
+        return output[0..idx];
+    }
 }
 
-test "ADC instruction (basic)" {
-    // Program Assembly
-    //
-    // LDA #$81
-    // STA $0200
-    // ADC $0200
-    //
-    // BRK
-    //
-    // zig fmt: off
-    const program = [_]u8{0xA9, 0x81, 0x8D, 0x00, 0x02, 0x6D, 0x00, 0x02, 0x00};
-    // zig fmt: on
-
-    var cpu = try Cpu.init(testing_allocator);
-    defer cpu.deinit();
-
-    try cpu.loadAndRun(&program);
-
-    // expected registers
-    try expect(cpu.reg_a == 0x02);
-
-    // expected flags
-    try expect(!cpu.flags.N);
-    try expect(cpu.flags.V);
-    try expect(cpu.flags.B);
-    try expect(!cpu.flags.D);
-    try expect(cpu.flags.I);
-    try expect(!cpu.flags.Z);
-    try expect(cpu.flags.C);
-}
-
-test "SBC instruction" {
-    // Program Assembly
-    //
-    //LDA #$81
-    //STA $0200
-    //ADC $0200
-    //
-    //TAX
-    //
-    //ASL A
-    //ASL $0200
-    //ASL $0200
-    //
-    //SEC
-    //SBC $0200
-    //
-    //TXA
-    //
-    //LDX $0200
-    //
-    //BRK
-    //
-    // zig fmt: off
-    const program = [_]u8{
-        0xA9, 0x81, 0x8D, 0x00, 0x02, 0x6D, 0x00, 0x02, 0xAA, 0x0A, 0x0E, 0x00,
-        0x02, 0x0E, 0x00, 0x02, 0x38, 0xED, 0x00, 0x02, 0x8A, 0xAE, 0x00, 0x02,
-        0x00,
-    };
-    // zig fmt: on
-
-    var cpu = try Cpu.init(testing_allocator);
-    defer cpu.deinit();
-
-    try cpu.loadAndRun(&program);
-
-    // expected registers
-    try expect(cpu.reg_a == 0x02);
-    try expect(cpu.reg_x == 0x04);
-
-    // expected flags
-    try expect(!cpu.flags.N);
-    try expect(!cpu.flags.V);
-    try expect(cpu.flags.B);
-    try expect(!cpu.flags.D);
-    try expect(cpu.flags.I);
-    try expect(!cpu.flags.Z);
-    try expect(cpu.flags.C);
+test "6502 cpu tests" {
+    _ = @import("./cpu/load_and_store.zig");
+    _ = @import("./cpu/adc_inst.zig");
+    _ = @import("./cpu/sbc_inst.zig");
 }
