@@ -23,6 +23,10 @@ pub fn build(b: *Build) !void {
     const optimize = b.standardOptimizeOption(.{});
     const version = try std.SemanticVersion.parse("0.1.0");
 
+    const lib = b.addModule("pixeka", .{
+        .root_source_file = .{ .path = "src/lib.zig" },
+    });
+
     const exe = b.addExecutable(.{
         .name = "pixeka",
         .root_source_file = .{ .path = "src/main.zig" },
@@ -46,11 +50,11 @@ pub fn build(b: *Build) !void {
     run_step.dependOn(&run_cmd.step);
 
     const exe_unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = .{ .path = "tests/main.zig" },
         .target = target,
         .optimize = optimize,
     });
-
+    exe_unit_tests.root_module.addImport("pixeka", lib);
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 
     const test_step = b.step("test", "Run unit tests");
