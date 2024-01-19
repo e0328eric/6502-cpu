@@ -34,7 +34,7 @@ test "load and store (immediate, absolute)" {
     var cpu = try Cpu.init(testing_allocator);
     defer cpu.deinit();
 
-    try cpu.loadAndRun(false, program);
+    try cpu.loadAndRunAt(.@"test", false, program);
 
     // expected registers
     try expect(cpu.reg_a == 0x08);
@@ -42,7 +42,7 @@ test "load and store (immediate, absolute)" {
     try expect(cpu.reg_y == 0x05);
 
     // expected program counter
-    try expect(cpu.pc == 0x8025);
+    try expect(cpu.pc == 0x0625);
 }
 
 // Program Assembly

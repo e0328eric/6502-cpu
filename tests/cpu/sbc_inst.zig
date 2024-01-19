@@ -7,18 +7,18 @@ const expect = std.testing.expect;
 
 // Program Assembly
 //
-//lda #$81
-//sta $0200
-//adc $0200
-//tax
-//asl A
-//asl $0200
-//asl $0200
-//sec
-//sbc $0200
-//txa
-//ldx $0200
-//brk
+// lda #$81
+// sta $0200
+// adc $0200
+// tax
+// asl A
+// asl $0200
+// asl $0200
+// sec
+// sbc $0200
+// txa
+// ldx $0200
+// brk
 test "SBC instruction (basic)" {
     const program_str =
         \\0600: a9 81 8d 00 02 6d 00 02 aa 0a 0e 00 02 0e 00 02

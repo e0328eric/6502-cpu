@@ -1,6 +1,8 @@
 const std = @import("std");
+const mem = std.mem;
 
 const CpuBus = @import("./bus.zig").CpuBus;
+const ProgramLocation = @import("./bus.zig").ProgramLocation;
 const Allocator = std.mem.Allocator;
 
 // NOTE: reference: https://www.nesdev.org/wiki/Status_flags
@@ -63,32 +65,24 @@ pub fn deinit(self: Self) void {
     self.allocator.destroy(self.bus);
 }
 
-pub fn loadProgram(self: Self, program: []const u8) !void {
-    try self.bus.loadProgram(program);
-    self.bus.write16Bit(0xFFFC, 0x8000);
+pub inline fn loadAndRun(self: *Self, comptime dump_reg: bool, program: []const u8) !void {
+    return self.loadAndRunAt(.real, dump_reg, program);
 }
 
-pub fn reset(self: *Self) void {
-    self.sp = STACK_RESET;
-    self.flags.I = true;
-    self.pc = self.bus.read16Bit(0xFFFC);
-}
-
-pub fn loadAndRun(self: *Self, comptime dump_reg: bool, program: []const u8) !void {
-    try self.loadProgram(program);
+pub fn loadAndRunAt(
+    self: *Self,
+    comptime program_location: ProgramLocation,
+    comptime dump_reg: bool,
+    program: []const u8,
+) !void {
+    try self.loadProgramAt(program_location, program);
     self.reset();
 
     while (true) {
         const opcode = self.bus.readByte(self.pc);
         self.pc += 1;
 
-        if (dump_reg) {
-            std.debug.print("< a: ${x}, x: ${x}, y: ${x} >\n", .{
-                self.reg_a,
-                self.reg_x,
-                self.reg_y,
-            });
-        }
+        if (dump_reg) self.dumpCpuStatus();
 
         // TODO: make an interrupt request and remove this line
         if (opcode == 0x00) break; // BRK instruction
@@ -97,20 +91,63 @@ pub fn loadAndRun(self: *Self, comptime dump_reg: bool, program: []const u8) !vo
     }
 }
 
+fn loadProgramAt(
+    self: Self,
+    comptime program_location: ProgramLocation,
+    program: []const u8,
+) !void {
+    try self.bus.loadProgramAt(program_location, program);
+    const addr = switch (program_location) {
+        .real => 0x8000,
+        .@"test" => 0x0600,
+    };
+    self.bus.write16Bit(0xFFFC, addr);
+}
+
+fn reset(self: *Self) void {
+    self.sp = STACK_RESET;
+    self.flags.I = true;
+    self.pc = self.bus.read16Bit(0xFFFC);
+}
+
+fn dumpCpuStatus(self: Self) void {
+    std.debug.print("=======================\n", .{});
+    std.debug.print("<main registers>\na: ${x}, x: ${x}, y: ${x}\n", .{
+        self.reg_a,
+        self.reg_x,
+        self.reg_y,
+    });
+    std.debug.print("<pointers>\npc: ${x}, sp: ${x}\n", .{
+        self.pc,
+        self.sp,
+    });
+    std.debug.print("<flag registers>\n", .{});
+    std.debug.print("NV_BDIZC\n{b:0>8}\n", .{mem.toNative(u8, @bitCast(self.flags), .big)});
+    std.debug.print("=======================\n\n", .{});
+}
+
+inline fn isReg(comptime reg: u8) bool {
+    return reg == 'a' or reg == 'x' or reg == 'y';
+}
+
+inline fn isFlag(comptime flag: u8) bool {
+    return switch (flag) {
+        'C', 'Z', 'I', 'D', 'B', 'V', 'N' => true,
+        else => false,
+    };
+}
+
 const SetFlagInfo = union(enum) {
     is_carried: bool,
     zeroed_data: u8,
     neged_data: u8,
-    overflowed_data: struct {
+    is_overflowed: bool,
+    calc_overflow: struct {
         a: u8,
         b: u8,
         result: u8,
     },
 };
-
-inline fn isReg(comptime reg: u8) bool {
-    return reg == 'a' or reg == 'x' or reg == 'y';
-}
 
 fn setFlag(
     self: *Self,
@@ -127,38 +164,43 @@ fn setFlag(
         'I' => undefined,
         'D' => undefined,
         'B' => undefined,
-        'V' => {
-            const is_overflowed = ((info.overflowed_data.a ^ info.overflowed_data.result) &
-                (info.overflowed_data.b ^ info.overflowed_data.result)) >> 7 == 1;
-            self.flags.V = is_overflowed;
+        'V' => switch (info) {
+            .is_overflowed => |info_data| self.flags.V = info_data,
+            .calc_overflow => |info_data| {
+                const is_overflowed = ((info_data.a ^ info_data.result) &
+                    (info_data.b ^ info_data.result)) >> 7 == 1;
+                self.flags.V = is_overflowed;
+            },
+            else => unreachable, // NOTE: SetFlagInfo should not be taken from IO
         },
         'N' => if (info.neged_data & 0x80 != 0) {
             self.flags.N = true;
         } else {
             self.flags.N = false;
         },
-        else => @compileError("Invalid `flag` was found"),
+        else => @compileError("invalid `flag` was found."),
     }
 }
 
 const AddressingMode = enum(u8) {
     NoneAddressing = 0,
     Immediate,
+    Relative,
     ZeroPage,
     ZeroPageX,
     ZeroPageY,
     Absolute,
     AbsoluteX,
     AbsoluteY,
+    Indirect,
     IndirectX,
     IndirectY,
 };
 
 fn getOperandAddress(self: Self, comptime mode: AddressingMode) u16 {
     return switch (mode) {
-        .Immediate => self.pc,
+        .Immediate, .Relative => self.pc,
         .ZeroPage => @as(u16, self.bus.readByte(self.pc)),
-        .Absolute => self.bus.read16Bit(self.pc),
         .ZeroPageX => blk: {
             const pos = self.bus.readByte(self.pc);
             break :blk @as(u16, pos +% self.reg_x);
@@ -167,6 +209,7 @@ fn getOperandAddress(self: Self, comptime mode: AddressingMode) u16 {
             const pos = self.bus.readByte(self.pc);
             break :blk @as(u16, pos +% self.reg_y);
         },
+        .Absolute => self.bus.read16Bit(self.pc),
         .AbsoluteX => blk: {
             const pos = self.bus.read16Bit(self.pc);
             break :blk pos +% @as(u16, self.reg_x);
@@ -174,6 +217,10 @@ fn getOperandAddress(self: Self, comptime mode: AddressingMode) u16 {
         .AbsoluteY => blk: {
             const pos = self.bus.read16Bit(self.pc);
             break :blk pos +% @as(u16, self.reg_y);
+        },
+        .Indirect => blk: {
+            const pos = self.bus.read16Bit(self.pc);
+            break :blk self.bus.read16Bit(pos);
         },
         .IndirectX => blk: {
             const pos = self.bus.readByte(self.pc);
@@ -198,15 +245,8 @@ fn getOperandAddress(self: Self, comptime mode: AddressingMode) u16 {
 inline fn incPc(self: *Self, comptime addr_mode: AddressingMode) void {
     switch (addr_mode) {
         .NoneAddressing => {},
-        .Immediate => self.pc += 1,
-        .ZeroPage => self.pc += 1,
-        .ZeroPageX => self.pc += 1,
-        .ZeroPageY => self.pc += 1,
-        .Absolute => self.pc += 2,
-        .AbsoluteX => self.pc += 2,
-        .AbsoluteY => self.pc += 2,
-        .IndirectX => self.pc += 1,
-        .IndirectY => self.pc += 1,
+        .Absolute, .AbsoluteX, .AbsoluteY, .Indirect => self.pc += 2,
+        else => self.pc += 1,
     }
 }
 
@@ -227,7 +267,27 @@ fn runOnce(self: *Self, opcode: u8) void {
         0xF8 => self.flags.D = true, // SED
         0x78 => self.flags.I = true, // SEI
 
-        // increment value
+        // clearing flag instructions
+        0x18 => self.flags.C = false, // CLC
+        0xD8 => self.flags.D = false, // CLD
+        0x58 => self.flags.I = false, // CLI
+        0xB8 => self.flags.V = false, // CLV
+
+        // increment and decrement operators
+        // INC instruction
+        0xE6 => self.increment('m', .ZeroPage),
+        0xF6 => self.increment('m', .ZeroPageX),
+        0xEE => self.increment('m', .Absolute),
+        0xFE => self.increment('m', .AbsoluteX),
+        0xE8 => self.increment('x', .NoneAddressing), // INX
+        0xC8 => self.increment('y', .NoneAddressing), // INY
+        // DEC instruction
+        0xC6 => self.increment('m', .ZeroPage),
+        0xD6 => self.increment('m', .ZeroPageX),
+        0xCE => self.increment('m', .Absolute),
+        0xDE => self.increment('m', .AbsoluteX),
+        0xCA => self.decrement('x', .NoneAddressing), // DEX
+        0x88 => self.decrement('y', .NoneAddressing), // DEY
 
         // ADC instruction
         0x69 => self.adc(.Immediate),
@@ -286,6 +346,46 @@ fn runOnce(self: *Self, opcode: u8) void {
         0x0E => self.asl(.Absolute),
         0x1E => self.asl(.AbsoluteX),
 
+        // BIT instruction
+        0x24 => self.bit(.ZeroPage),
+        0x2C => self.bit(.Absolute),
+
+        // jump instructions
+        // JMP instruction
+        0x4C => self.pc = self.getOperandAddress(.Absolute),
+        0x6C => self.pc = self.getOperandAddress(.Indirect),
+
+        // branch instructions
+        0x90 => self.branchIf('C', false), // BCC
+        0xB0 => self.branchIf('C', true), // BCS
+        0xD0 => self.branchIf('Z', false), // BNE
+        0xF0 => self.branchIf('Z', true), // BEQ
+        0x10 => self.branchIf('N', false), // BPL
+        0x30 => self.branchIf('N', true), // BMI
+        0x50 => self.branchIf('V', false), // BVC
+        0x70 => self.branchIf('V', true), // BVS
+
+        // compare instructions
+        // CMP instruction
+        0xC9 => self.compare('a', .Immediate),
+        0xC5 => self.compare('a', .ZeroPage),
+        0xD5 => self.compare('a', .ZeroPageX),
+        0xCD => self.compare('a', .Absolute),
+        0xDD => self.compare('a', .AbsoluteX),
+        0xD9 => self.compare('a', .AbsoluteY),
+        0xC1 => self.compare('a', .IndirectX),
+        0xD1 => self.compare('a', .IndirectY),
+
+        // CPX instruction
+        0xE0 => self.compare('x', .Immediate),
+        0xE4 => self.compare('x', .ZeroPage),
+        0xEC => self.compare('x', .Absolute),
+
+        // CPY instruction
+        0xC0 => self.compare('y', .Immediate),
+        0xC4 => self.compare('y', .ZeroPage),
+        0xCC => self.compare('y', .Absolute),
+
         // LDA instruction
         0xA9 => self.ldInst('a', .Immediate),
         0xA5 => self.ldInst('a', .ZeroPage),
@@ -342,10 +442,8 @@ fn runOnce(self: *Self, opcode: u8) void {
 }
 
 fn adc(self: *Self, comptime addr_mode: AddressingMode) void {
-    const addr = self.getOperandAddress(addr_mode);
-
     const old_reg_a = self.reg_a;
-    const memory_data = self.bus.readByte(addr);
+    const memory_data = self.bus.readByte(self.getOperandAddress(addr_mode));
 
     const add_with_overflow = blk: {
         const tmp1 = @addWithOverflow(old_reg_a, memory_data);
@@ -358,7 +456,7 @@ fn adc(self: *Self, comptime addr_mode: AddressingMode) void {
     self.setFlag('Z', .{ .zeroed_data = self.reg_a });
     self.setFlag('N', .{ .neged_data = self.reg_a });
     self.setFlag('C', .{ .is_carried = add_with_overflow[1] });
-    self.setFlag('V', .{ .overflowed_data = .{
+    self.setFlag('V', .{ .calc_overflow = .{
         .a = old_reg_a,
         .b = memory_data,
         .result = add_with_overflow[0],
@@ -370,10 +468,8 @@ fn adc(self: *Self, comptime addr_mode: AddressingMode) void {
 // NOTE: see https://web.archive.org/web/20200129081101/http://users.telenet.be:80/kim1-6502/6502/proman.html#222
 // 6502 manual page 15
 fn sbc(self: *Self, comptime addr_mode: AddressingMode) void {
-    const addr = self.getOperandAddress(addr_mode);
-
     const old_reg_a = self.reg_a;
-    const memory_data = self.bus.readByte(addr);
+    const memory_data = self.bus.readByte(self.getOperandAddress(addr_mode));
 
     const sub_with_overflow = blk: {
         const tmp1 = @addWithOverflow(old_reg_a, ~memory_data);
@@ -386,7 +482,7 @@ fn sbc(self: *Self, comptime addr_mode: AddressingMode) void {
     self.setFlag('Z', .{ .zeroed_data = self.reg_a });
     self.setFlag('N', .{ .neged_data = self.reg_a });
     self.setFlag('C', .{ .is_carried = sub_with_overflow[1] });
-    self.setFlag('V', .{ .overflowed_data = .{
+    self.setFlag('V', .{ .calc_overflow = .{
         .a = old_reg_a,
         .b = ~memory_data,
         .result = sub_with_overflow[0],
@@ -431,6 +527,110 @@ fn asl(self: *Self, comptime addr_mode: AddressingMode) void {
     self.setFlag('C', .{ .is_carried = shled_data[1] == 1 });
 
     self.incPc(addr_mode);
+}
+
+fn bit(self: *Self, comptime addr_mode: AddressingMode) void {
+    const addr_val = self.bus.readByte(self.getOperandAddress(addr_mode));
+    const val = addr_val & self.reg_a;
+
+    self.setFlag('Z', .{ .zeroed_data = val });
+    self.setFlag('N', .{ .neged_data = addr_val });
+    self.setFlag('V', .{ .is_overflowed = addr_val & 0x40 != 0 });
+
+    self.incPc(addr_mode);
+}
+
+fn increment(
+    self: *Self,
+    comptime reg: u8,
+    comptime addr_mode: AddressingMode,
+) void {
+    if (reg != 'x' and reg != 'y' and reg != 'm') {
+        @compileError("`reg` should be either `x`, `y` or `m`.");
+    }
+
+    if (reg == 'm') {
+        const addr = self.getOperandAddress(addr_mode);
+        const val = self.bus.readByte(addr) +% 1;
+        self.bus.writeByte(addr, val);
+
+        self.setFlag('Z', .{ .zeroed_data = val });
+        self.setFlag('N', .{ .neged_data = val });
+    } else {
+        const reg_name = "reg_" ++ [_]u8{reg};
+        @field(self, reg_name) +%= 1;
+
+        self.setFlag('Z', .{ .zeroed_data = @field(self, reg_name) });
+        self.setFlag('N', .{ .neged_data = @field(self, reg_name) });
+    }
+
+    self.incPc(addr_mode);
+}
+
+fn decrement(
+    self: *Self,
+    comptime reg: u8,
+    comptime addr_mode: AddressingMode,
+) void {
+    if (reg != 'x' and reg != 'y' and reg != 'm') {
+        @compileError("`reg` should be either `x`, `y` or `m`.");
+    }
+
+    if (reg == 'm') {
+        const addr = self.getOperandAddress(addr_mode);
+        const val = self.bus.readByte(addr) -% 1;
+        self.bus.writeByte(addr, val);
+
+        self.setFlag('Z', .{ .zeroed_data = val });
+        self.setFlag('N', .{ .neged_data = val });
+    } else {
+        const reg_name = "reg_" ++ [_]u8{reg};
+        @field(self, reg_name) -%= 1;
+
+        self.setFlag('Z', .{ .zeroed_data = @field(self, reg_name) });
+        self.setFlag('N', .{ .neged_data = @field(self, reg_name) });
+    }
+
+    self.incPc(addr_mode);
+}
+
+fn compare(self: *Self, comptime reg: u8, comptime addr_mode: AddressingMode) void {
+    if (!isReg(reg)) {
+        @compileError("`reg` should be either `a`, `x`, or `y`.");
+    }
+
+    const reg_name = "reg_" ++ [_]u8{reg};
+    const addr_val = self.bus.readByte(self.getOperandAddress(addr_mode));
+    const val = @subWithOverflow(@field(self, reg_name), addr_val);
+
+    self.setFlag('C', .{ .is_carried = val[1] == 0 });
+    self.setFlag('Z', .{ .zeroed_data = val[0] });
+    self.setFlag('N', .{ .neged_data = val[0] });
+
+    self.incPc(addr_mode);
+}
+
+fn branchIf(
+    self: *Self,
+    comptime flag_kind: u8,
+    comptime required_set: bool,
+) void {
+    if (!isFlag(flag_kind)) {
+        @compileError("invalid `flag_kind` was found.");
+    }
+
+    const flag_str = [_]u8{flag_kind};
+
+    if (@field(self.flags, &flag_str) == required_set) {
+        const pc_offset = self.bus.readByte(self.pc);
+        if (@as(i8, @bitCast(pc_offset)) < 0) {
+            self.pc -|= @as(u16, ~pc_offset + 1);
+        } else {
+            self.pc += @as(u16, pc_offset);
+        }
+    }
+
+    self.incPc(.Relative);
 }
 
 fn ldInst(self: *Self, comptime reg: u8, comptime addr_mode: AddressingMode) void {

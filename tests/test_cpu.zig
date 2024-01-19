@@ -13,7 +13,7 @@ pub inline fn parseHexDump(comptime hex_dump: []const u8) []const u8 {
             if (num_lit[num_lit.len -| 1] == ':') continue;
             output[idx] = fmt.parseInt(u8, num_lit, 16) catch {
                 @compileError(fmt.comptimePrint(
-                    "cannot parse {s} into a hexdecimal integer",
+                    "cannot parse `{s}` into a hexdecimal integer",
                     .{num_lit},
                 ));
             };
@@ -28,4 +28,5 @@ test "6502 cpu tests" {
     _ = @import("./cpu/load_and_store.zig");
     _ = @import("./cpu/adc_inst.zig");
     _ = @import("./cpu/sbc_inst.zig");
+    _ = @import("./cpu/branch_and_jump.zig");
 }

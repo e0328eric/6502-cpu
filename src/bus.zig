@@ -5,6 +5,14 @@ const assert = std.debug.assert;
 const CPU_RAM_CAPACITY: usize = 0x800;
 const CARTRIDGE_CAPACITY: usize = 0xBFE0;
 
+const REAL_PROGRAM_LOCATION: usize = 0x8000;
+const TEST_PROGRAM_LOCATION: usize = 0x0600;
+
+pub const ProgramLocation = enum(u1) {
+    real = 0,
+    @"test",
+};
+
 pub fn isMemory(comptime T: type) bool {
     // zig fmt: off
     return @hasDecl(T, "readByte") and @hasDecl(T, "writeByte")
@@ -81,15 +89,34 @@ pub const CpuBus = struct {
         self.writeByte(addr + 1, @truncate(hi));
     }
 
-    pub fn loadProgram(self: *Self, program: []const u8) !void {
-        const program_size = 0xFFFA - 0x8000;
+    pub fn loadProgramAt(
+        self: *Self,
+        comptime program_location: ProgramLocation,
+        program: []const u8,
+    ) !void {
+        switch (program_location) {
+            .real => {
+                const program_size = 0xFFFA - 0x8000;
 
-        if (program.len > program_size) {
-            return error.CannotLoadProgram;
+                if (program.len > program_size) {
+                    return error.CannotLoadProgram;
+                }
+
+                const program_start_point = 0x8000 - 0x4020;
+                const program_end_point = program_start_point + program.len;
+                @memcpy(self.cartridge_space[program_start_point..program_end_point], program);
+            },
+            .@"test" => {
+                const program_size = 0x07FF - 0x0600;
+
+                if (program.len > program_size) {
+                    return error.CannotLoadProgram;
+                }
+
+                const program_start_point = 0x0600;
+                const program_end_point = program_start_point + program.len;
+                @memcpy(self.ram[program_start_point..program_end_point], program);
+            },
         }
-
-        const program_start_point = 0x8000 - 0x4020;
-        const program_end_point = program_start_point + program.len;
-        @memcpy(self.cartridge_space[program_start_point..program_end_point], program);
     }
 };
