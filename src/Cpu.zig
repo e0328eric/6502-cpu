@@ -1,9 +1,11 @@
 const std = @import("std");
-const mem = std.mem;
 
 const CpuBus = @import("./bus.zig").CpuBus;
 const ProgramLocation = @import("./bus.zig").ProgramLocation;
 const Allocator = std.mem.Allocator;
+
+const STACK_TOP: u16 = 0x0100;
+const STACK_RESET: u8 = 0xFD;
 
 // NOTE: reference: https://www.nesdev.org/wiki/Status_flags
 //
@@ -30,9 +32,6 @@ pub const FlagReg = packed struct {
     V: bool = false,
     N: bool = false,
 };
-
-const STACK_TOP: u16 = 0x0100;
-const STACK_RESET: u8 = 0xFD;
 
 allocator: Allocator,
 reg_a: u8,
@@ -122,7 +121,7 @@ fn dumpCpuStatus(self: Self) void {
         self.sp,
     });
     std.debug.print("<flag registers>\n", .{});
-    std.debug.print("NV_BDIZC\n{b:0>8}\n", .{mem.toNative(u8, @bitCast(self.flags), .big)});
+    std.debug.print("NV_BDIZC\n{b:0>8}\n", .{@as(u8, @bitCast(self.flags))});
     std.debug.print("=======================\n\n", .{});
 }
 
@@ -262,6 +261,9 @@ fn runOnce(self: *Self, opcode: u8) void {
             return;
         },
 
+        // TODO: implement RTI instruction
+        0x40 => {},
+
         // setting flag instrictions
         0x38 => self.flags.C = true, // SEC
         0xF8 => self.flags.D = true, // SED
@@ -346,6 +348,27 @@ fn runOnce(self: *Self, opcode: u8) void {
         0x0E => self.asl(.Absolute),
         0x1E => self.asl(.AbsoluteX),
 
+        // LSR instruction
+        0x4A => self.lsr(.NoneAddressing),
+        0x46 => self.lsr(.ZeroPage),
+        0x56 => self.lsr(.ZeroPageX),
+        0x4E => self.lsr(.Absolute),
+        0x5E => self.lsr(.AbsoluteX),
+
+        // ROL instruction
+        0x2A => self.rol(.NoneAddressing),
+        0x26 => self.rol(.ZeroPage),
+        0x36 => self.rol(.ZeroPageX),
+        0x2E => self.rol(.Absolute),
+        0x3E => self.rol(.AbsoluteX),
+
+        // ROR instruction
+        0x6A => self.rol(.NoneAddressing),
+        0x66 => self.rol(.ZeroPage),
+        0x76 => self.rol(.ZeroPageX),
+        0x6E => self.rol(.Absolute),
+        0x7E => self.rol(.AbsoluteX),
+
         // BIT instruction
         0x24 => self.bit(.ZeroPage),
         0x2C => self.bit(.Absolute),
@@ -354,6 +377,8 @@ fn runOnce(self: *Self, opcode: u8) void {
         // JMP instruction
         0x4C => self.pc = self.getOperandAddress(.Absolute),
         0x6C => self.pc = self.getOperandAddress(.Indirect),
+        0x20 => self.jsr(), // JSR
+        0x60 => self.rts(), // RTS
 
         // branch instructions
         0x90 => self.branchIf('C', false), // BCC
@@ -385,6 +410,32 @@ fn runOnce(self: *Self, opcode: u8) void {
         0xC0 => self.compare('y', .Immediate),
         0xC4 => self.compare('y', .ZeroPage),
         0xCC => self.compare('y', .Absolute),
+
+        // stack manipulation
+        // PHA instruction
+        0x48 => {
+            self.bus.writeByte(STACK_TOP + @as(u16, self.sp), self.reg_a);
+            self.sp -%= 1;
+        },
+        // PLA instruction
+        0x68 => {
+            self.sp +%= 1;
+            self.reg_a = self.bus.readByte(STACK_TOP + @as(u16, self.sp));
+            self.setFlag('Z', .{ .zeroed_data = self.reg_a });
+            self.setFlag('N', .{ .neged_data = self.reg_a });
+        },
+        // PHP instruction
+        0x08 => {
+            const flags_data: u8 = @bitCast(self.flags);
+            self.bus.writeByte(STACK_TOP + @as(u16, self.sp), flags_data);
+            self.sp -%= 1;
+        },
+        // PLP instruction
+        0x28 => {
+            self.sp +%= 1;
+            const flag_data = self.bus.readByte(STACK_TOP + @as(u16, self.sp));
+            self.flags = @bitCast(flag_data);
+        },
 
         // LDA instruction
         0xA9 => self.ldInst('a', .Immediate),
@@ -513,6 +564,7 @@ fn bitOpInst(
 
 fn asl(self: *Self, comptime addr_mode: AddressingMode) void {
     var shled_data: struct { u8, u1 } = undefined;
+
     if (addr_mode == .NoneAddressing) {
         shled_data = @shlWithOverflow(self.reg_a, 1);
         self.reg_a = shled_data[0];
@@ -529,6 +581,78 @@ fn asl(self: *Self, comptime addr_mode: AddressingMode) void {
     self.incPc(addr_mode);
 }
 
+fn lsr(self: *Self, comptime addr_mode: AddressingMode) void {
+    var rored_data: struct { u8, u1 } = undefined;
+
+    if (addr_mode == .NoneAddressing) {
+        rored_data[1] = @truncate(self.reg_a | 1);
+        self.reg_a >>= 1;
+        rored_data[0] = self.reg_a;
+    } else {
+        const addr = self.getOperandAddress(addr_mode);
+        const addr_data = self.bus.readByte(addr);
+
+        rored_data[1] = @truncate(addr_data | 1);
+        rored_data[0] = addr_data >> 1;
+        self.bus.writeByte(addr, rored_data[0]);
+    }
+
+    self.setFlag('Z', .{ .zeroed_data = rored_data[0] });
+    self.setFlag('N', .{ .neged_data = rored_data[0] });
+    self.setFlag('C', .{ .is_carried = rored_data[1] == 1 });
+
+    self.incPc(addr_mode);
+}
+
+fn rol(self: *Self, comptime addr_mode: AddressingMode) void {
+    var roled_data: struct { u8, u1 } = undefined;
+    const padding: u8 = @intCast(@intFromBool(self.flags.C));
+
+    if (addr_mode == .NoneAddressing) {
+        roled_data = @shlWithOverflow(self.reg_a, 1);
+        roled_data[0] |= padding;
+
+        self.reg_a = roled_data[0];
+    } else {
+        const addr = self.getOperandAddress(addr_mode);
+        roled_data = @shlWithOverflow(self.bus.readByte(addr), 1);
+        roled_data[0] |= padding;
+
+        self.bus.writeByte(addr, roled_data[0]);
+    }
+
+    self.setFlag('Z', .{ .zeroed_data = roled_data[0] });
+    self.setFlag('N', .{ .neged_data = roled_data[0] });
+    self.setFlag('C', .{ .is_carried = roled_data[1] == 1 });
+
+    self.incPc(addr_mode);
+}
+
+fn ror(self: *Self, comptime addr_mode: AddressingMode) void {
+    var rored_data: struct { u8, u1 } = undefined;
+    const padding: u8 = @as(u8, @intCast(@intFromBool(self.flags.C))) << 7;
+
+    if (addr_mode == .NoneAddressing) {
+        rored_data[1] = @truncate(self.reg_a | 1);
+        rored_data[0] = (self.reg_a >> 1) | padding;
+
+        self.reg_a = rored_data[0];
+    } else {
+        const addr = self.getOperandAddress(addr_mode);
+        const addr_data = self.bus.readByte(addr);
+
+        rored_data[1] = @truncate(addr_data | 1);
+        rored_data[0] = (addr_data >> 1) | padding;
+        self.bus.writeByte(addr, rored_data[0]);
+    }
+
+    self.setFlag('Z', .{ .zeroed_data = rored_data[0] });
+    self.setFlag('N', .{ .neged_data = rored_data[0] });
+    self.setFlag('C', .{ .is_carried = rored_data[1] == 1 });
+
+    self.incPc(addr_mode);
+}
+
 fn bit(self: *Self, comptime addr_mode: AddressingMode) void {
     const addr_val = self.bus.readByte(self.getOperandAddress(addr_mode));
     const val = addr_val & self.reg_a;
@@ -538,6 +662,24 @@ fn bit(self: *Self, comptime addr_mode: AddressingMode) void {
     self.setFlag('V', .{ .is_overflowed = addr_val & 0x40 != 0 });
 
     self.incPc(addr_mode);
+}
+
+fn jsr(self: *Self) void {
+    const addr = self.getOperandAddress(.Absolute);
+
+    self.bus.writeByte(STACK_TOP + @as(u16, self.sp), @truncate((self.pc + 1) >> 8));
+    self.bus.writeByte(STACK_TOP + @as(u16, self.sp -% 1), @truncate((self.pc + 1) & 0xFF));
+
+    self.sp -%= 2;
+    self.pc = addr;
+}
+
+fn rts(self: *Self) void {
+    const lo = self.bus.readByte(STACK_TOP + (self.sp +% 1));
+    const hi = self.bus.readByte(STACK_TOP + (self.sp +% 2));
+
+    self.pc = (@as(u16, hi) << 8 | @as(u16, lo)) + 1;
+    self.sp +%= 2;
 }
 
 fn increment(

@@ -29,4 +29,6 @@ test "6502 cpu tests" {
     _ = @import("./cpu/adc_inst.zig");
     _ = @import("./cpu/sbc_inst.zig");
     _ = @import("./cpu/branch_and_jump.zig");
+    _ = @import("./cpu/stack.zig");
+    _ = @import("./cpu/rule110.zig");
 }
