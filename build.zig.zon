@@ -5,12 +5,12 @@
     // This field is optional.
     // This is currently advisory only; Zig does not yet do anything
     // with this value.
-    //.minimum_zig_version = "0.11.0",
+    .minimum_zig_version = "0.12.0",
 
     .dependencies = .{
         .raylib = .{
-            .url = "https://github.com/raysan5/raylib/archive/9d628d1d499f8ad9c0e6fbed69914cecb611d6cd.tar.gz",
-            .hash = "12205d16f4498cc73ff65fe195480f5303435aa5f1ccbb0b52674e9b090f9e68fcd2",
+            .url = "https://github.com/raysan5/raylib/archive/a17a81f05b62d92af1bff103721d17a180aa84e5.tar.gz",
+            .hash = "1220a29ace9ca021796ca38aad1ea5b5701e6b268f06b32e36b4baa50207e1dde52e",
         },
     },
 

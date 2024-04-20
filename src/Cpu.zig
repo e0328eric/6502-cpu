@@ -64,7 +64,7 @@ pub fn deinit(self: Self) void {
     self.allocator.destroy(self.bus);
 }
 
-pub inline fn loadAndRun(self: *Self, comptime dump_reg: bool, program: []const u8) !void {
+pub fn loadAndRun(self: *Self, comptime dump_reg: bool, program: []const u8) !void {
     return self.loadAndRunAt(.real, dump_reg, program);
 }
 
