@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const min_zig_version_str = "0.12.0";
+const min_zig_version_str = "0.13.0-dev.211+6a65561e3";
 
 const Build = blk: {
     const current_zig_version_str = builtin.zig_version_string;
@@ -24,12 +24,12 @@ pub fn build(b: *Build) !void {
     const version = try std.SemanticVersion.parse("0.1.0");
 
     const lib = b.addModule("pixeka", .{
-        .root_source_file = .{ .path = "src/lib.zig" },
+        .root_source_file = b.path("src/lib.zig"),
     });
 
     const exe = b.addExecutable(.{
         .name = "pixeka",
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
         .version = version,
@@ -50,7 +50,7 @@ pub fn build(b: *Build) !void {
     run_step.dependOn(&run_cmd.step);
 
     const exe_unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "tests/main.zig" },
+        .root_source_file = b.path("tests/main.zig"),
         .target = target,
         .optimize = optimize,
     });
