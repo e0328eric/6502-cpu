@@ -1,4 +1,4 @@
-# pixeka
+# 6502-cpu
 A Toy Project. This is a NES Emulator with raylib written in zig.
 
 # References
