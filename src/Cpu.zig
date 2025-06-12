@@ -255,14 +255,23 @@ fn runOnce(self: *Self, opcode: u8) void {
         0xEA => {},
 
         // BRK instruction
-        // TODO: make an interrupt request
         0x00 => {
-            self.flags.B = true;
-            return;
+            self.pc += 1;
+            self.push(true, self.pc);
+
+            var flags = self.flags;
+            flags.B = true;
+            self.push(false, @bitCast(flags));
+            self.flags.I = true;
+
+            self.pc = self.bus.read16Bit(0xFFFE);
         },
 
-        // TODO: implement RTI instruction
-        0x40 => {},
+        // RTI instruction
+        0x40 => {
+            self.flags = @bitCast(self.pop(false));
+            self.pc = self.pop(true);
+        },
 
         // setting flag instrictions
         0x38 => self.flags.C = true, // SEC
@@ -413,27 +422,24 @@ fn runOnce(self: *Self, opcode: u8) void {
 
         // stack manipulation
         // PHA instruction
-        0x48 => {
-            self.bus.writeByte(STACK_TOP + @as(u16, self.sp), self.reg_a);
-            self.sp -%= 1;
-        },
+        0x48 => self.push(false, self.reg_a),
+
         // PLA instruction
         0x68 => {
-            self.sp +%= 1;
-            self.reg_a = self.bus.readByte(STACK_TOP + @as(u16, self.sp));
+            self.reg_a = self.pop(false);
             self.setFlag('Z', .{ .zeroed_data = self.reg_a });
             self.setFlag('N', .{ .neged_data = self.reg_a });
         },
+
         // PHP instruction
         0x08 => {
             const flags_data: u8 = @bitCast(self.flags);
-            self.bus.writeByte(STACK_TOP + @as(u16, self.sp), flags_data);
-            self.sp -%= 1;
+            self.push(false, flags_data);
         },
+
         // PLP instruction
         0x28 => {
-            self.sp +%= 1;
-            const flag_data = self.bus.readByte(STACK_TOP + @as(u16, self.sp));
+            const flag_data = self.pop(false);
             self.flags = @bitCast(flag_data);
         },
 
@@ -667,19 +673,17 @@ fn bit(self: *Self, comptime addr_mode: AddressingMode) void {
 fn jsr(self: *Self) void {
     const addr = self.getOperandAddress(.Absolute);
 
-    self.bus.writeByte(STACK_TOP + @as(u16, self.sp), @truncate((self.pc + 1) >> 8));
-    self.bus.writeByte(STACK_TOP + @as(u16, self.sp -% 1), @truncate((self.pc + 1) & 0xFF));
+    self.push(false, @truncate((self.pc + 1) >> 8));
+    self.push(false, @truncate((self.pc + 1) & 0xFF));
 
-    self.sp -%= 2;
     self.pc = addr;
 }
 
 fn rts(self: *Self) void {
-    const lo = self.bus.readByte(STACK_TOP + (self.sp +% 1));
-    const hi = self.bus.readByte(STACK_TOP + (self.sp +% 2));
+    const lo = self.pop(false);
+    const hi = self.pop(false);
 
     self.pc = (@as(u16, hi) << 8 | @as(u16, lo)) + 1;
-    self.sp +%= 2;
 }
 
 fn increment(
@@ -750,6 +754,26 @@ fn compare(self: *Self, comptime reg: u8, comptime addr_mode: AddressingMode) vo
     self.setFlag('N', .{ .neged_data = val[0] });
 
     self.incPc(addr_mode);
+}
+
+fn push(self: *Self, comptime is_16bit: bool, val: anytype) void {
+    if (is_16bit) {
+        self.bus.write16Bit(STACK_TOP + @as(u16, self.sp -% 1), val);
+        self.sp -%= 2;
+    } else {
+        self.bus.writeByte(STACK_TOP + @as(u16, self.sp), val);
+        self.sp -%= 1;
+    }
+}
+
+fn pop(self: *Self, comptime is_16bit: bool) if (is_16bit) u16 else u8 {
+    if (is_16bit) {
+        self.sp +%= 2;
+        return self.bus.read16Bit(STACK_TOP + @as(u16, self.sp -% 1));
+    } else {
+        self.sp +%= 1;
+        return self.bus.readByte(STACK_TOP + @as(u16, self.sp));
+    }
 }
 
 fn branchIf(
