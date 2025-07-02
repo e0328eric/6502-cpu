@@ -261,7 +261,7 @@ fn runOnce(self: *Self, opcode: u8) void {
 
             var flags = self.flags;
             flags.B = true;
-            self.push(false, @bitCast(flags));
+            self.push(false, @as(u8, @bitCast(flags)));
             self.flags.I = true;
 
             self.pc = self.bus.read16Bit(0xFFFE);
@@ -673,8 +673,8 @@ fn bit(self: *Self, comptime addr_mode: AddressingMode) void {
 fn jsr(self: *Self) void {
     const addr = self.getOperandAddress(.Absolute);
 
-    self.push(false, @truncate((self.pc + 1) >> 8));
-    self.push(false, @truncate((self.pc + 1) & 0xFF));
+    self.push(false, @as(u8, @truncate((self.pc + 1) >> 8)));
+    self.push(false, @as(u8, @truncate((self.pc + 1) & 0xFF)));
 
     self.pc = addr;
 }

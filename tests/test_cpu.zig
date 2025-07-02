@@ -22,10 +22,10 @@ pub inline fn parseHexDump(comptime hex_dump: []const u8) []const u8 {
 }
 
 test "6502 cpu tests" {
-    _ = @import("./cpu/load_and_store.zig");
-    _ = @import("./cpu/adc_inst.zig");
-    _ = @import("./cpu/sbc_inst.zig");
-    _ = @import("./cpu/branch_and_jump.zig");
-    _ = @import("./cpu/stack.zig");
-    _ = @import("./cpu/rule110.zig");
+    _ = @import("cpu/load_and_store.zig");
+    _ = @import("cpu/adc_inst.zig");
+    _ = @import("cpu/sbc_inst.zig");
+    _ = @import("cpu/branch_and_jump.zig");
+    _ = @import("cpu/stack.zig");
+    _ = @import("cpu/rule110.zig");
 }

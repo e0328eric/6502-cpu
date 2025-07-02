@@ -1,16 +1,13 @@
 .{
-    .name = "pixeka",
+    .name = .pixeka,
     .version = "0.1.0",
-
-    // This field is optional.
-    // This is currently advisory only; Zig does not yet do anything
-    // with this value.
-    .minimum_zig_version = "0.12.0",
+    .fingerprint = 0x72e9db449a5da0ed,
+    .minimum_zig_version = "0.14.1",
 
     .dependencies = .{
         .raylib = .{
-            .url = "https://github.com/raysan5/raylib/archive/9d67f4734b59244b5b10d45ce7c8eed76323c3b5.tar.gz",
-            .hash = "122068abe457f6929773136b17048ff465e517146f073b35eea1f6600b4c9356054c",
+            .url = "git+https://github.com/raysan5/raylib.git#bdda18656b301303b711785db48ac311655bb3d9",
+            .hash = "raylib-5.5.0-whq8uExcNgQBBys4-PIIEqPuWO-MpfOJkwiM4Q1nLXVN",
         },
     },
 

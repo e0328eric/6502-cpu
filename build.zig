@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const min_zig_version_str = "0.13.0-dev.211+6a65561e3";
+const min_zig_version_str = "0.14.1";
 
 const Build = blk: {
     const current_zig_version_str = builtin.zig_version_string;
